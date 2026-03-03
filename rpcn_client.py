@@ -11,6 +11,8 @@ Quick start:
 import ssl
 import socket
 import struct
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
 # ---------------------------------------------------------------------------
 # Protocol constants (must match src/server/client.rs and src/server.rs)
@@ -52,6 +54,80 @@ _HDR_FMT = "<BHIQ"  # 1+2+4+8 = 15 bytes
 
 class RpcnError(Exception):
 	pass
+
+
+# ---------------------------------------------------------------------------
+# DTOs
+# ---------------------------------------------------------------------------
+
+@dataclass
+class LoginInfo:
+	online_name: str
+	avatar_url: str
+	user_id: int
+
+	def __str__(self):
+		return f"online_name={self.online_name!r}, avatar_url={self.avatar_url!r}, user_id={self.user_id}"
+
+@dataclass
+class RoomInfo:
+	room_id: int
+	owner_npid: str
+	current_members: int
+	max_slots: int
+
+	def __str__(self):
+		return f"Room {self.room_id}: {self.current_members}/{self.max_slots} players, owner={self.owner_npid or '?'}"
+
+@dataclass
+class SearchRoomsResult:
+	total: int
+	rooms: list  # list[RoomInfo]
+
+	def __str__(self):
+		lines = [f"{self.total} room(s)"]
+		for room in self.rooms:
+			lines.append(f"  {room}")
+		return "\n".join(lines)
+
+@dataclass
+class ScoreEntry:
+	rank: int
+	np_id: str
+	online_name: str
+	score: int
+	pc_id: int
+	record_date: int
+	has_game_data: bool
+	comment: str
+	game_info: bytes
+
+	def __str__(self):
+		lines = [
+			f"#{self.rank:4d}  npId: {self.np_id:<20s}  online: {self.online_name or '(none)'}",
+			f"       score={self.score}  pcId={self.pc_id}  "
+			f"recorded={_format_epoch(self.record_date)}  hasGameData={self.has_game_data}",
+		]
+		if self.comment:
+			lines.append(f'       comment: "{self.comment}"')
+		if self.game_info:
+			lines.append(f"       gameInfo: {len(self.game_info)} bytes")
+		return "\n".join(lines)
+
+@dataclass
+class ScoreResult:
+	total_records: int
+	last_sort_date: int
+	entries: list  # list[ScoreEntry]
+
+	def __str__(self):
+		lines = [
+			f"Total records: {self.total_records}",
+			f"Last sort date: {_format_epoch(self.last_sort_date)}",
+		]
+		for entry in self.entries:
+			lines.append(str(entry))
+		return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -119,12 +195,12 @@ class RpcnClient:
 	# Authentication
 	# ------------------------------------------------------------------
 
-	def login(self, username: str, password: str, token: str = "") -> dict:
+	def login(self, username: str, password: str, token: str = "") -> LoginInfo:
 		"""Log in to RPCN.
 
 		Payload: username\\0 password\\0 token\\0  (token is empty for normal login)
 
-		Returns a dict with keys: online_name, avatar_url, user_id.
+		Returns a LoginInfo with online_name, avatar_url, user_id.
 		Raises RpcnError on failure.
 		"""
 		payload = (
@@ -149,7 +225,7 @@ class RpcnClient:
 		avatar_url, pos  = _read_cstr(data, pos)
 		(user_id,) = struct.unpack_from("<q", data, pos)
 		# The remainder is friend-list data which we don't need to parse here.
-		return {"online_name": online_name, "avatar_url": avatar_url, "user_id": user_id}
+		return LoginInfo(online_name=online_name, avatar_url=avatar_url, user_id=user_id)
 
 	# ------------------------------------------------------------------
 	# Server / World list
@@ -178,10 +254,10 @@ class RpcnClient:
 	# Rooms
 	# ------------------------------------------------------------------
 
-	def search_rooms(self, com_id: str, world_id: int = 0, start_index: int = 1, max_results: int = 20):
+	def search_rooms(self, com_id: str, world_id: int = 0, start_index: int = 1, max_results: int = 20) -> SearchRoomsResult:
 		"""Search for active rooms in the given world.
 
-		Returns a SearchRoomResponse protobuf message.
+		Returns a SearchRoomsResult DTO.
 		Requires np2_structs_pb2 (generate with grpc_tools.protoc).
 		Note: start_index must be >= 1 (the server rejects 0).
 		"""
@@ -200,7 +276,16 @@ class RpcnClient:
 
 		resp = pb.SearchRoomResponse()
 		resp.ParseFromString(_unpack_data_packet(data))
-		return resp
+		rooms = [
+			RoomInfo(
+				room_id=room.roomId,
+				owner_npid=room.owner.npId if room.owner else "",
+				current_members=room.curMemberNum.value,
+				max_slots=room.maxSlot.value,
+			)
+			for room in resp.rooms
+		]
+		return SearchRoomsResult(total=resp.total, rooms=rooms)
 
 	# ------------------------------------------------------------------
 	# Scores / Leaderboards
@@ -208,10 +293,10 @@ class RpcnClient:
 
 	def get_score_range(self, com_id: str, board_id: int,
 	                    start_rank: int = 1, num_ranks: int = 10,
-	                    with_comment: bool = False, with_game_info: bool = False):
+	                    with_comment: bool = False, with_game_info: bool = False) -> ScoreResult:
 		"""Fetch leaderboard entries by rank range.
 
-		Returns a GetScoreResponse protobuf message.
+		Returns a ScoreResult DTO.
 		"""
 		pb = _import_pb2()
 		req = pb.GetScoreRangeRequest()
@@ -229,13 +314,13 @@ class RpcnClient:
 
 		resp = pb.GetScoreResponse()
 		resp.ParseFromString(_unpack_data_packet(data))
-		return resp
+		return _score_response_to_dto(resp)
 
 	def get_score_npid(self, com_id: str, board_id: int, npids: list,
-	                   pc_id: int = 0, with_comment: bool = False, with_game_info: bool = False):
+	                   pc_id: int = 0, with_comment: bool = False, with_game_info: bool = False) -> ScoreResult:
 		"""Fetch scores for a list of NP IDs.
 
-		Returns a GetScoreResponse protobuf message.
+		Returns a ScoreResult DTO.
 		"""
 		pb = _import_pb2()
 		req = pb.GetScoreNpIdRequest()
@@ -255,7 +340,7 @@ class RpcnClient:
 
 		resp = pb.GetScoreResponse()
 		resp.ParseFromString(_unpack_data_packet(data))
-		return resp
+		return _score_response_to_dto(resp)
 
 	# ------------------------------------------------------------------
 	# Internal I/O
@@ -306,6 +391,17 @@ class RpcnClient:
 # Module-level helpers
 # ---------------------------------------------------------------------------
 
+def _format_epoch(epoch_us: int) -> str:
+	"""Convert a microsecond epoch timestamp to a readable UTC datetime string."""
+	if epoch_us == 0:
+		return "N/A"
+	try:
+		dt = datetime.fromtimestamp(epoch_us / 1_000_000, tz=timezone.utc)
+		return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+	except (OSError, ValueError):
+		return f"epoch={epoch_us}"
+
+
 def _encode_com_id(com_id_str: str) -> bytes:
 	"""Encode a comm ID string like 'NPWR04850_00' to 12 ASCII bytes."""
 	if len(com_id_str) != COMMUNICATION_ID_SIZE:
@@ -337,6 +433,30 @@ def _unpack_data_packet(data: bytes) -> bytes:
 		raise RpcnError(f"Data packet too short: {len(data)} bytes")
 	(size,) = struct.unpack_from("<I", data, 0)
 	return data[4:4 + size]
+
+
+def _score_response_to_dto(resp) -> ScoreResult:
+	"""Convert a GetScoreResponse protobuf into a ScoreResult DTO."""
+	entries = []
+	for i, entry in enumerate(resp.rankArray):
+		comment = resp.commentArray[i] if i < len(resp.commentArray) else ""
+		game_info = resp.infoArray[i].data if i < len(resp.infoArray) else b""
+		entries.append(ScoreEntry(
+			rank=entry.rank,
+			np_id=entry.npId,
+			online_name=entry.onlineName,
+			score=entry.score,
+			pc_id=entry.pcId,
+			record_date=entry.recordDate,
+			has_game_data=entry.hasGameData,
+			comment=comment,
+			game_info=game_info,
+		))
+	return ScoreResult(
+		total_records=resp.totalRecord,
+		last_sort_date=resp.lastSortDate,
+		entries=entries,
+	)
 
 
 def _import_pb2():
@@ -375,9 +495,9 @@ if __name__ == "__main__":
 
 	print(f"Logging in as {args.user!r} ...")
 	info = client.login(args.user, args.password, args.token)
-	print(f"  online_name : {info['online_name']}")
-	print(f"  avatar_url  : {info['avatar_url']}")
-	print(f"  user_id     : {info['user_id']}")
+	print(f"  online_name : {info.online_name}")
+	print(f"  avatar_url  : {info.avatar_url}")
+	print(f"  user_id     : {info.user_id}")
 
 	client.disconnect()
 	print("Done.")

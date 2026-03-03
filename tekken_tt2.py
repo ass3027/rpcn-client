@@ -23,7 +23,7 @@ from rpcn_client import RpcnClient, RpcnError
 # ---------------------------------------------------------------------------
 
 # Primary comm ID (EU/US disc — verify against your game's PARAM.SFO)
-TTT2_COM_ID = "NPWR04850_00"
+TTT2_COM_ID = "NPWR02973_00"
 
 # Score board IDs — TTT2 uses board 0 for the main ranking
 TTT2_BOARD_ID = 0
@@ -58,13 +58,7 @@ def print_rooms(client: RpcnClient, com_id: str, worlds: list):
 				continue
 			print(f"\n  World {world_id}: {resp.total} room(s) (showing {len(resp.rooms)})")
 			for room in resp.rooms:
-				owner = room.owner.npId if room.owner else "?"
-				# curMemberNum and maxSlot are uint16 wrapper messages (see proto)
-				print(
-					f"    Room {room.roomId}: "
-					f"{room.curMemberNum.value}/{room.maxSlot.value} players, "
-					f"owner={owner}"
-				)
+				print(f"    {room}")
 			total += resp.total
 		except RpcnError as e:
 			print(f"  World {world_id}: search failed — {e}")
@@ -74,22 +68,19 @@ def print_rooms(client: RpcnClient, com_id: str, worlds: list):
 
 
 def print_leaderboard(client: RpcnClient, com_id: str, board_id: int, num_ranks: int = 10):
-	"""Fetch and print the top N leaderboard entries."""
+	"""Fetch and print the top N leaderboard entries with full detail."""
 	print(f"\n=== Top {num_ranks} leaderboard (board {board_id}) for {com_id} ===")
 	try:
 		resp = client.get_score_range(
 			com_id, board_id,
 			start_rank=1, num_ranks=num_ranks,
-			with_comment=False, with_game_info=False,
+			with_comment=True, with_game_info=True,
 		)
-		if resp.totalRecord == 0:
+		if resp.total_records == 0:
 			print("  (no scores recorded)")
 			return
-		print(f"  Total records: {resp.totalRecord}")
-		for entry in resp.rankArray:
-			print(
-				f"  #{entry.rank:4d}  {entry.npId:<20s}  score={entry.score}"
-			)
+		for line in str(resp).splitlines():
+			print(f"  {line}")
 	except RpcnError as e:
 		print(f"  Leaderboard query failed — {e}")
 
@@ -120,7 +111,7 @@ def main():
 
 		print(f"Logging in as {args.user!r} ...")
 		info = client.login(args.user, args.password, args.token)
-		print(f"  Logged in — online_name={info['online_name']!r}")
+		print(f"  Logged in — {info}")
 
 		worlds = print_server_world_tree(client, args.com_id)
 		print_rooms(client, args.com_id, worlds)
