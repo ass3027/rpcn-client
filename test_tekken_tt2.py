@@ -79,8 +79,13 @@ def test_get_leaderboard(session):
     """Integration test for get_leaderboard — returns TTT2LeaderboardResult with parsed entries."""
     pytest.importorskip("np2_structs_pb2")
     client = session["client"]
-    resp = get_leaderboard(client, COM_ID, BOARD_ID, num_ranks=5)
+    resp = get_leaderboard(client, COM_ID, BOARD_ID, num_ranks=100)
     print(f"Returned leaderboard: {resp}")
+    map = [{
+        'id': ent.np_id,
+       'main': ent.player_info.main_char_info.__str__(),
+        'sub': ent.player_info.sub_char_info.__str__(),
+    } for ent in resp.entries]
     assert isinstance(resp, TTT2LeaderboardResult)
     for entry in resp.entries:
         assert isinstance(entry, TTT2LeaderboardEntry)
