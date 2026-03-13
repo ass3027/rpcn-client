@@ -1,23 +1,29 @@
-"""Tekken Tag Tournament 2 RPCN queries.
+"""Tekken Tag Tournament 2 RPCN queries and API server.
 
-Queries the official RPCN server for TTT2 server/world list, active rooms,
-and leaderboard scores.
+Credentials are read from environment variables:
+  RPCN_USER      - RPCN username (required)
+  RPCN_PASSWORD  - RPCN password (required)
+  RPCN_TOKEN     - RPCN token   (optional, default: "")
+  RPCN_HOST      - server host  (optional, default: np.rpcs3.net)
+  RPCN_PORT      - server port  (optional, default: 31313)
 
-Usage:
-  pip install -r requirements.txt
-  python -m grpc_tools.protoc -I. --python_out=. np2_structs.proto
+CLI usage:
   python tekken_tt2.py --user YOUR_USER --password YOUR_PASS
 
-Comm ID note:
-  NPWR04850_00 is the candidate for Tekken Tag Tournament 2 (NPEB01406 / NPUB30958).
-  If get_server_list() returns an empty list, the comm ID is wrong for your
-  region — try the alternate below.  The definitive source is the game's
-  PARAM.SFO (NP_COMMUNICATION_ID field) or RPCS3's gamedb.yml.
+API usage:
+  RPCN_USER=you RPCN_PASSWORD=secret uvicorn tekken_tt2:app --reload
 """
 
-import argparse
+import json
+import logging
+import os
 import struct
+from contextlib import contextmanager
 from dataclasses import dataclass
+
+import redis as _redis
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
 from rpcn_client import RpcnClient, RpcnError, SearchRoomsResult, ScoreEntry
 from tekken_tt2_data import TTT2_CHARACTERS
 
@@ -25,16 +31,16 @@ from tekken_tt2_data import TTT2_CHARACTERS
 # Game constants
 # ---------------------------------------------------------------------------
 
-# Primary comm ID (EU/US disc — verify against your game's PARAM.SFO)
 TTT2_COM_ID = "NPWR02973_00"
-
-# Score board IDs — TTT2 uses board 0 for the main ranking
 TTT2_BOARD_ID = 0
 
-# game_info struct: 4 header bytes + 4 big-endian uint32s + 44 bytes padding
 _GAME_INFO_FMT = ">4B4I"
-_GAME_INFO_SIZE = 20  # first 20 bytes are meaningful
+_GAME_INFO_SIZE = 20
 
+
+# ---------------------------------------------------------------------------
+# Dataclasses
+# ---------------------------------------------------------------------------
 
 @dataclass
 class CharInfo:
@@ -60,19 +66,6 @@ class TTT2GameInfo:
 
 	def __str__(self):
 		return f"{self.main_char_info} + {self.sub_char_info}"
-
-
-def parse_game_info(data: bytes) -> TTT2GameInfo | None:
-	"""Parse a 64-byte TTT2 game_info blob. Returns None if data is too short."""
-	if len(data) < _GAME_INFO_SIZE:
-		return None
-	c1_id, c2_id, c1_rank,c2_rank, c1_w, c2_w, c1_l, c2_l = struct.unpack(
-		_GAME_INFO_FMT, data[:_GAME_INFO_SIZE]
-	)
-	return TTT2GameInfo(
-		main_char_info=CharInfo(char_id=c1_id, rank=c1_rank, wins=c1_w, losses=c1_l),
-		sub_char_info=CharInfo(char_id=c2_id, rank=c2_rank, wins=c2_w, losses=c2_l),
-	)
 
 
 @dataclass
@@ -103,6 +96,23 @@ class TTT2LeaderboardResult:
 	entries: list[TTT2LeaderboardEntry]
 
 
+# ---------------------------------------------------------------------------
+# Game logic
+# ---------------------------------------------------------------------------
+
+def parse_game_info(data: bytes) -> TTT2GameInfo | None:
+	"""Parse a 64-byte TTT2 game_info blob. Returns None if data is too short."""
+	if len(data) < _GAME_INFO_SIZE:
+		return None
+	c1_id, c2_id, c1_rank, c2_rank, c1_w, c2_w, c1_l, c2_l = struct.unpack(
+		_GAME_INFO_FMT, data[:_GAME_INFO_SIZE]
+	)
+	return TTT2GameInfo(
+		main_char_info=CharInfo(char_id=c1_id, rank=c1_rank, wins=c1_w, losses=c1_l),
+		sub_char_info=CharInfo(char_id=c2_id, rank=c2_rank, wins=c2_w, losses=c2_l),
+	)
+
+
 def format_score_entry(entry: ScoreEntry) -> str:
 	"""Format a ScoreEntry with TTT2-specific game_info decoding."""
 	base = str(entry)
@@ -112,10 +122,6 @@ def format_score_entry(entry: ScoreEntry) -> str:
 			base += f"\n       >> {info}"
 	return base
 
-
-# ---------------------------------------------------------------------------
-# Query functions
-# ---------------------------------------------------------------------------
 
 def get_server_world_tree(client: RpcnClient, com_id: str) -> dict[int, list[int]]:
 	"""Fetch the server → world hierarchy.  Returns {server_id: [world_ids]}."""
@@ -163,67 +169,126 @@ def get_leaderboard(client: RpcnClient, com_id: str, board_id: int, num_ranks: i
 
 
 # ---------------------------------------------------------------------------
-# Main
+# API config
 # ---------------------------------------------------------------------------
 
-def main():
-	parser = argparse.ArgumentParser(description="Tekken Tag Tournament 2 RPCN queries")
-	parser.add_argument("--host",     default="np.rpcs3.net")
-	parser.add_argument("--port",     type=int, default=31313)
-	parser.add_argument("--user",     required=True, default="lsjin",help="RPCN username")
-	parser.add_argument("--password", required=True, default="crecent1",help="RPCN password")
-	parser.add_argument("--token",    default="63FE49A5083ECBA0", help="RPCN token (optional)")
-	parser.add_argument("--com-id",   default=TTT2_COM_ID,
-	                    help=f"Comm ID to query (default: {TTT2_COM_ID})")
-	parser.add_argument("--board",    type=int, default=TTT2_BOARD_ID,
-	                    help=f"Score board ID (default: {TTT2_BOARD_ID})")
-	parser.add_argument("--top",      type=int, default=10,
-	                    help="Number of leaderboard entries to display (default: 10)")
-	args = parser.parse_args()
+_HOST = os.getenv("RPCN_HOST", "np.rpcs3.net")
+_PORT = int(os.getenv("RPCN_PORT", "31313"))
 
-	with RpcnClient(host=args.host, port=args.port) as client:
-		print(f"Connecting to {args.host}:{args.port} ...")
-		version = client.connect()
-		print(f"  Protocol version: {version}")
+_REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+_redis_client = _redis.from_url(_REDIS_URL, decode_responses=True)
 
-		print(f"Logging in as {args.user!r} ...")
-		info = client.login(args.user, args.password, args.token)
-		print(f"  Logged in — {info}")
+_TTL = {
+	"servers":     int(os.getenv("CACHE_TTL_SERVERS",     "3600")),
+	"leaderboard": int(os.getenv("CACHE_TTL_LEADERBOARD", "300")),
+	"rooms":       int(os.getenv("CACHE_TTL_ROOMS",       "60")),
+	"rooms_all":   int(os.getenv("CACHE_TTL_ROOMS_ALL",   "60")),
+}
 
-		# Server → world tree
-		tree = get_server_world_tree(client, args.com_id)
-		print(f"\n=== Server list for {args.com_id} ({len(tree)} server(s)) ===")
-		all_worlds = []
-		for server_id, worlds in tree.items():
-			print(f"  Server {server_id}: {len(worlds)} world(s) -> {worlds}")
-			all_worlds.extend(worlds)
 
-		# Active rooms
-		print(f"\n=== Active rooms for {args.com_id} ===")
-		rooms = get_rooms(client, args.com_id, all_worlds)
-		for world_id, resp in rooms.items():
-			print(f"\n  World {world_id}: {resp.total} room(s) (showing {len(resp.rooms)})")
-			for room in resp.rooms:
-				print(f"    {room}")
-		if not rooms:
-			print("  (no active rooms found)")
+def _cache_get(key: str):
+	try:
+		raw = _redis_client.get(key)
+		return json.loads(raw) if raw else None
+	except Exception as e:
+		logging.warning("Redis get failed: %s", e)
+		return None
 
-		# Leaderboard
-		print(f"\n=== Top {args.top} leaderboard (board {args.board}) for {args.com_id} ===")
+
+def _cache_set(key: str, value, ttl: int):
+	try:
+		_redis_client.setex(key, ttl, json.dumps(value))
+	except Exception as e:
+		logging.warning("Redis set failed: %s", e)
+
+
+@contextmanager
+def _api_client():
+	"""Open an authenticated RpcnClient for an API request."""
+	user = os.environ["RPCN_USER"]
+	password = os.environ["RPCN_PASSWORD"]
+	token = os.getenv("RPCN_TOKEN", "")
+	with RpcnClient(host=_HOST, port=_PORT) as client:
 		try:
-			lb = get_leaderboard(client, args.com_id, args.board, num_ranks=args.top)
-			if lb.total_records == 0:
-				print("  (no scores recorded)")
-			else:
-				print(f"  Total records: {lb.total_records}")
-				for entry in lb.entries:
-					for line in str(entry).splitlines():
-						print(f"  {line}")
-		except RpcnError as e:
-			print(f"  Leaderboard query failed — {e}")
-
-	print("\nDone.")
+			client.connect()
+			client.login(user, password, token)
+			yield client
+		except RpcnError as exc:
+			raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-if __name__ == "__main__":
-	main()
+# ---------------------------------------------------------------------------
+# API endpoints
+# ---------------------------------------------------------------------------
+
+app = FastAPI(
+	title="Tekken Tag Tournament 2 RPCN API",
+	description="Live data from the RPCN multiplayer server for TTT2.",
+)
+
+
+@app.get("/servers", summary="Server and world list")
+def servers(com_id: str = Query(default=TTT2_COM_ID, description="Game comm ID")):
+	"""Return the server → world hierarchy for the given comm ID."""
+	key = f"ttt2:servers:{com_id}"
+	if cached := _cache_get(key):
+		return cached
+	with _api_client() as client:
+		tree = get_server_world_tree(client, com_id)
+	result = {str(k): v for k, v in tree.items()}
+	_cache_set(key, result, _TTL["servers"])
+	return result
+
+
+@app.get("/rooms", summary="Active rooms")
+def rooms(com_id: str = Query(default=TTT2_COM_ID, description="Game comm ID")):
+	"""Return all active rooms across every world for the given comm ID."""
+	key = f"ttt2:rooms:{com_id}"
+	if cached := _cache_get(key):
+		return cached
+	with _api_client() as client:
+		tree = get_server_world_tree(client, com_id)
+		all_worlds = [w for worlds in tree.values() for w in worlds]
+		room_map = get_rooms(client, com_id, all_worlds)
+	result = {str(world_id): resp for world_id, resp in room_map.items()}
+	_cache_set(key, jsonable_encoder(result), _TTL["rooms"])
+	return result
+
+
+@app.get("/rooms/all", summary="All rooms including hidden")
+def rooms_all(
+	com_id: str = Query(default=TTT2_COM_ID, description="Game comm ID"),
+	world_id: int = Query(default=0, description="World ID (0 = any)"),
+	start_index: int = Query(default=1, ge=1, description="Pagination start index"),
+	max_results: int = Query(default=20, ge=1, le=20, description="Max results (capped at 20)"),
+):
+	"""Search all rooms including hidden ones via SearchRoomAll."""
+	key = f"ttt2:rooms_all:{com_id}:{world_id}:{start_index}:{max_results}"
+	if cached := _cache_get(key):
+		return cached
+	with _api_client() as client:
+		resp = client.search_rooms_all(
+			com_id,
+			world_id=world_id,
+			start_index=start_index,
+			max_results=max_results,
+		)
+	_cache_set(key, jsonable_encoder(resp), _TTL["rooms_all"])
+	return resp
+
+
+@app.get("/leaderboard", summary="Leaderboard entries")
+def leaderboard(
+	com_id: str = Query(default=TTT2_COM_ID, description="Game comm ID"),
+	board: int = Query(default=TTT2_BOARD_ID, description="Score board ID"),
+	top: int = Query(default=10, ge=1, le=100, description="Number of entries to return"),
+):
+	"""Return the top N leaderboard entries with TTT2 character info decoded."""
+	key = f"ttt2:leaderboard:{com_id}:{board}:{top}"
+	if cached := _cache_get(key):
+		return cached
+	with _api_client() as client:
+		lb = get_leaderboard(client, com_id, board, num_ranks=top)
+	_cache_set(key, jsonable_encoder(lb), _TTL["leaderboard"])
+	return lb
+
