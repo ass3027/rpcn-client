@@ -1,3 +1,5 @@
 protobuf>=4.0
 grpcio-tools>=1.50
 pytest
+fastapi>=0.110
+uvicorn>=0.29
