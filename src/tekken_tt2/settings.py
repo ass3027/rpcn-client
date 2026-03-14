@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     cache_ttl_rooms: int = 60
     cache_ttl_rooms_all: int = 60
 
+    cors_origins: list[str] = ["*"]
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 
