@@ -5,15 +5,22 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rpcn-client"
 version = "0.1.0"
-description = "Minimal Python client for the RPCN PSN multiplayer server"
+description = "RPCN client and Tekken Tag Tournament 2 API server"
 requires-python = ">=3.10"
-dependencies = ["protobuf>=4.0", "grpcio-tools>=1.50"]
+dependencies = [
+    "protobuf>=4.0",
+    "grpcio-tools>=1.50",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "redis>=5.0",
+]
 
 [project.scripts]
 rpcn-client = "rpcn_client.__main__:main"
+tekken-tt2  = "tekken_tt2.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "examples"]
+pythonpath = ["src"]

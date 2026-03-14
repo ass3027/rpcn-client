@@ -25,11 +25,14 @@ Always use the project virtual environment when running Python commands:
 ## Running
 
 ```bash
-# CLI smoke test (connect + login + disconnect)
-.venv/Scripts/python.exe -m rpcn_client --user YOUR_USER --password YOUR_PASS
+# Start the TTT2 API server
+RPCN_USER=U RPCN_PASSWORD=P .venv/Scripts/python.exe -m tekken_tt2
 
-# Optional flags
-.venv/Scripts/python.exe -m rpcn_client --host rpcn.rpcs3.net --port 31313 --user U --password P --token T
+# Or with uvicorn directly (supports --reload)
+RPCN_USER=U RPCN_PASSWORD=P .venv/Scripts/python.exe -m uvicorn tekken_tt2.app:app --reload
+
+# RPCN client CLI smoke test (connect + login + disconnect)
+.venv/Scripts/python.exe -m rpcn_client --user YOUR_USER --password YOUR_PASS
 ```
 
 ## Tests

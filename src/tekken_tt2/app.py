@@ -7,11 +7,8 @@ Credentials are read from environment variables:
   RPCN_HOST      - server host  (optional, default: np.rpcs3.net)
   RPCN_PORT      - server port  (optional, default: 31313)
 
-CLI usage:
-  python tekken_tt2.py --user YOUR_USER --password YOUR_PASS
-
 API usage:
-  RPCN_USER=you RPCN_PASSWORD=secret uvicorn tekken_tt2:app --reload
+  RPCN_USER=you RPCN_PASSWORD=secret uvicorn tekken_tt2.app:app --reload
 """
 
 import json
@@ -25,7 +22,7 @@ import redis as _redis
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
 from rpcn_client import RpcnClient, RpcnError, SearchRoomsResult, ScoreEntry
-from tekken_tt2_data import TTT2_CHARACTERS
+from tekken_tt2.data import TTT2_CHARACTERS
 
 # ---------------------------------------------------------------------------
 # Game constants
@@ -291,4 +288,3 @@ def leaderboard(
 		lb = get_leaderboard(client, com_id, board, num_ranks=top)
 	_cache_set(key, jsonable_encoder(lb), _TTL["leaderboard"])
 	return lb
-
