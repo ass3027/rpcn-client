@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ttt2-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    # Strip /api prefix before forwarding to backend
+    alb.ingress.kubernetes.io/actions.rewrite-api: |
+      {"Type":"forward","ForwardConfig":{"TargetGroups":[{"ServiceName":"ttt2-backend-svc","ServicePort":"8000","Weight":1}]}}
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: ttt2-backend-svc
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ttt2-frontend-svc
+                port:
+                  number: 80

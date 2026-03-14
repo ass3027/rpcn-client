@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ttt2-backend
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ttt2-backend
+  template:
+    metadata:
+      labels:
+        app: ttt2-backend
+    spec:
+      containers:
+        - name: ttt2-backend
+          image: <account-id>.dkr.ecr.<region>.amazonaws.com/ttt2-backend:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: rpcn-config
+            - secretRef:
+                name: rpcn-credentials
+          readinessProbe:
+            httpGet:
+              path: /docs
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10

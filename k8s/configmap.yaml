@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rpcn-config
+  namespace: default
+data:
+  RPCN_HOST: "rpcn.mynarco.xyz"
+  RPCN_PORT: "31313"
+  RPCN_TOKEN: ""
+  REDIS_URL: "redis://<elasticache-endpoint>:6379"
+  CACHE_TTL_SERVERS: "3600"
+  CACHE_TTL_LEADERBOARD: "300"
+  CACHE_TTL_ROOMS: "60"
+  CACHE_TTL_ROOMS_ALL: "60"

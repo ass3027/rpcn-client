@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ttt2-frontend
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ttt2-frontend
+  template:
+    metadata:
+      labels:
+        app: ttt2-frontend
+    spec:
+      containers:
+        - name: ttt2-frontend
+          image: <account-id>.dkr.ecr.<region>.amazonaws.com/ttt2-frontend:latest
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
