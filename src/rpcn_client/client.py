@@ -199,7 +199,8 @@ class RpcnClient:
 		req.rangeFilter_max = min(max_results, 20)
 
 		payload = _encode_com_id(com_id) + _pack_protobuf(req)
-		self._send(CMD_SEARCH_ROOM_ALL, payload)
+		# self._send(CMD_SEARCH_ROOM_ALL, payload)
+		self._send(0x0106, payload)
 		error, data = self._recv_reply(CMD_SEARCH_ROOM_ALL)
 		if error != ERR_NO_ERROR:
 			raise RpcnError(f"SearchRoomAll error {error}")
