@@ -23,9 +23,16 @@ spec:
                 name: rpcn-config
             - secretRef:
                 name: rpcn-credentials
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
           readinessProbe:
             httpGet:
-              path: /docs
+              path: /health
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10

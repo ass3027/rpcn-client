@@ -8,7 +8,7 @@ COPY src/ ./src/
 COPY np2_structs.proto .
 COPY pyproject.toml .
 
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir .
 RUN python -m grpc_tools.protoc -I. --python_out=src/rpcn_client np2_structs.proto
 
-CMD ["uvicorn", "tekken_tt2.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "src"]

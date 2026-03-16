@@ -7,9 +7,6 @@ metadata:
     kubernetes.io/ingress.class: alb
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
-    # Strip /api prefix before forwarding to backend
-    alb.ingress.kubernetes.io/actions.rewrite-api: |
-      {"Type":"forward","ForwardConfig":{"TargetGroups":[{"ServiceName":"ttt2-backend-svc","ServicePort":"8000","Weight":1}]}}
 spec:
   rules:
     - http:

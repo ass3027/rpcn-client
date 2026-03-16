@@ -76,6 +76,11 @@ app.add_middleware(
 )
 
 
+@app.get("/health", include_in_schema=False)
+def health():
+    return {"status": "ok"}
+
+
 def _get_world_tree() -> dict[int, list[int]]:
 	"""Return {server_id: [world_ids]}, using the servers cache when available."""
 	key = f"ttt2:servers:{TTT2_COM_ID}"
