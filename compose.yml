@@ -1,4 +1,19 @@
 services:
+  be:
+    image: 864573346741.dkr.ecr.ap-northeast-2.amazonaws.com/tag2-now/be
+    ports:
+      - "8000:8000"
+    environment:
+      FAST_API_PROFILE: local
+    depends_on:
+      - redis
+  fe:
+    image: 864573346741.dkr.ecr.ap-northeast-2.amazonaws.com/tag2-now/fe
+    ports:
+      - "80:80"
+    environment:
+      BACKEND_URL: http://be:8000
+
   redis:
     image: redis:7-alpine
     ports:

@@ -29,7 +29,7 @@ Always use the project virtual environment when running Python commands:
 RPCN_USER=U RPCN_PASSWORD=P .venv/Scripts/python.exe -m tekken_tt2
 
 # Or with uvicorn directly (supports --reload)
-RPCN_USER=U RPCN_PASSWORD=P .venv/Scripts/python.exe -m uvicorn tekken_tt2.app:app --reload
+RPCN_USER=U RPCN_PASSWORD=P .venv/Scripts/python.exe -m uvicorn app:app --reload
 
 # RPCN client CLI smoke test (connect + login + disconnect)
 .venv/Scripts/python.exe -m rpcn_client --user YOUR_USER --password YOUR_PASS
