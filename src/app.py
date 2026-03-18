@@ -13,11 +13,13 @@ API usage:
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from tekken_tt2.cache import redis_health_check
+from tekken_tt2.client import shutdown_client
 from tekken_tt2.router import router as ttt2_router
 from env import get_settings
 
@@ -35,9 +37,16 @@ except Exception:
     logger.critical("Shutting down: Redis is unavailable")
     os._exit(1)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    shutdown_client()
+
+
 app = FastAPI(
     title="Tekken Tag Tournament 2 RPCN API",
     description="Live data from the RPCN multiplayer server for TTT2.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

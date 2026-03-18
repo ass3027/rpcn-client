@@ -70,6 +70,7 @@ def get_rooms(client: RpcnClient, com_id: str, worlds: list[int]) -> dict[str, l
 
 def get_rooms_all(client: RpcnClient, com_id: str, worlds: list[int]) -> dict[str, list[RoomInfoDTO]]:
 	"""Search all rooms (including hidden) across all worlds. Returns rooms grouped by type."""
+	# TODO rpcs 에서 방 search 시 잠시 방 나가지는 현상을 고려해서 캐싱 해야함
 	all_rooms: list[RoomInfoDTO] = []
 	for world_id in worlds:
 		try:

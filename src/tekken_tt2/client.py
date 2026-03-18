@@ -17,6 +17,20 @@ _RECONNECT_COOLDOWN = 5.0  # seconds
 _last_failure: float = 0.0
 
 
+def shutdown_client():
+    """Disconnect the shared RPCN client if connected."""
+    global _shared_client
+    with _client_lock:
+        if _shared_client is not None:
+            try:
+                _shared_client.disconnect()
+                logger.info("RPCN client disconnected")
+            except Exception:
+                logger.warning("RPCN disconnect failed", exc_info=True)
+            finally:
+                _shared_client = None
+
+
 @contextmanager
 def api_client():
     global _shared_client, _last_failure
