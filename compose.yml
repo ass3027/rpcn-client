@@ -4,7 +4,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      FAST_API_PROFILE: local
+      FAST_API_PROFILE: dev
     depends_on:
       - redis
   fe:
