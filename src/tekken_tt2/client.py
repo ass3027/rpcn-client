@@ -1,5 +1,5 @@
 """Singleton RPCN client lifecycle management."""
-
+import logging
 import time
 import threading
 from contextlib import contextmanager
@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from fastapi import HTTPException
 from rpcn_client import RpcnClient, RpcnError
 from env import get_settings
+
+logger = logging.getLogger(__name__)
 
 _client_lock = threading.Lock()
 _shared_client: RpcnClient | None = None
@@ -30,6 +32,7 @@ def api_client():
                 _shared_client.login(settings.rpcn_user, settings.rpcn_password, settings.rpcn_token)
             yield _shared_client
         except (RpcnError, OSError) as exc:
+            logger.error("RPCN connection error: %s", exc)
             if _shared_client is not None:
                 try:
                     _shared_client.disconnect()
