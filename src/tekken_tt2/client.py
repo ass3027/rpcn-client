@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from fastapi import HTTPException
 from rpcn_client import RpcnClient, RpcnError
 from env import get_settings
+from tekken_tt2.metrics import TrackedRpcnClient
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,8 @@ def api_client():
                 raise HTTPException(status_code=502, detail=f"RPCN reconnect cooldown ({_RECONNECT_COOLDOWN - elapsed:.1f}s remaining)")
         try:
             if _shared_client is None:
-                _shared_client = RpcnClient(host=settings.rpcn_host, port=settings.rpcn_port)
+                raw = RpcnClient(host=settings.rpcn_host, port=settings.rpcn_port)
+                _shared_client = TrackedRpcnClient(raw)
                 _shared_client.connect()
                 _shared_client.login(settings.rpcn_user, settings.rpcn_password, settings.rpcn_token)
             yield _shared_client
