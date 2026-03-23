@@ -105,26 +105,13 @@ async def create_comment(
     return comment
 
 
-@router.delete("/comments/{comment_id}", status_code=204)
-async def delete_comment(comment_id: int, user: str = Depends(get_user)):
-    post_id = await service.delete_comment(comment_id, user)
-    _invalidate_post(post_id)
-
-
 # ---------------------------------------------------------------------------
-# Thumbs
+# Thumbs (posts only)
 # ---------------------------------------------------------------------------
 
 @router.post("/posts/{post_id}/thumb")
 async def thumb_post(post_id: int, req: models.ThumbRequest, user: str = Depends(get_user)):
-    result = await service.toggle_thumb("post", post_id, user, req.direction)
+    result = await service.toggle_thumb(post_id, user, req.direction)
     _invalidate_posts()
     _invalidate_post(post_id)
-    return result
-
-
-@router.post("/comments/{comment_id}/thumb")
-async def thumb_comment(comment_id: int, req: models.ThumbRequest, user: str = Depends(get_user)):
-    result = await service.toggle_thumb("comment", comment_id, user, req.direction)
-    _invalidate_post(result.pop("post_id"))
     return result

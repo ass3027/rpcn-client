@@ -35,13 +35,9 @@ async def create_comment(post_id: int, author: str, body: str, parent_id: int | 
     return await get_repo().create_comment(post_id, author, body, parent_id)
 
 
-async def delete_comment(comment_id: int, user: str) -> int:
-    return await get_repo().delete_comment(comment_id, user)
-
-
 # ---------------------------------------------------------------------------
-# Thumbs
+# Thumbs (posts only)
 # ---------------------------------------------------------------------------
 
-async def toggle_thumb(target_type: str, target_id: int, voter: str, direction: int):
-    return await get_repo().toggle_thumb(target_type, target_id, voter, direction)
+async def toggle_thumb(post_id: int, voter: str, direction: int):
+    return await get_repo().toggle_thumb(post_id, voter, direction)

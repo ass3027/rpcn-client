@@ -34,20 +34,6 @@ def test_thumb_switch_direction(client):
     assert r.json()["thumbs_down"] == 1
 
 
-def test_thumb_comment(client):
-    post_id = _create_post(client)
-    r = client.post(
-        f"/community/posts/{post_id}/comments",
-        json={"body": "c"},
-        headers=HEADERS,
-    )
-    comment_id = r.json()["id"]
-
-    r = client.post(f"/community/comments/{comment_id}/thumb", json={"direction": -1}, headers=HEADERS)
-    assert r.status_code == 200
-    assert r.json()["thumbs_down"] == 1
-
-
 def test_thumb_invalid_direction(client):
     post_id = _create_post(client)
     r = client.post(f"/community/posts/{post_id}/thumb", json={"direction": 0}, headers=HEADERS)

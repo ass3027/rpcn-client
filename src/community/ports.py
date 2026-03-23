@@ -47,14 +47,8 @@ class CommunityRepository(ABC):
     ) -> dict:
         """Add a comment. Raises PostNotFoundError, CommentNotFoundError, NestingDepthError."""
 
-    @abstractmethod
-    async def delete_comment(self, comment_id: int, user: str) -> int:
-        """Delete a comment owned by *user*. Returns the owning post_id."""
-
-    # -- Thumbs --------------------------------------------------------------
+    # -- Thumbs (posts only) -------------------------------------------------
 
     @abstractmethod
-    async def toggle_thumb(
-        self, target_type: str, target_id: int, voter: str, direction: int
-    ) -> dict:
-        """Toggle a thumb vote. Returns dict with thumbs_up, thumbs_down (and post_id for comments)."""
+    async def toggle_thumb(self, post_id: int, voter: str, direction: int) -> dict:
+        """Toggle a thumb vote on a post. Returns dict with thumbs_up, thumbs_down."""

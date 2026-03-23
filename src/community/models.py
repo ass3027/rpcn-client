@@ -49,8 +49,6 @@ class CommentOut(BaseModel):
     parent_id: int | None
     author: str
     body: str
-    thumbs_up: int
-    thumbs_down: int
     created_at: datetime
     replies: list["CommentOut"] = []
 

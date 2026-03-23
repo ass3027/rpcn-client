@@ -51,8 +51,6 @@ def _item_to_comment(item: dict) -> dict:
         "parent_id": _decimal_to_int(item["parent_id"]) if item.get("parent_id") else None,
         "author": item["author"],
         "body": item["body"],
-        "thumbs_up": _decimal_to_int(item.get("thumbs_up", 0)),
-        "thumbs_down": _decimal_to_int(item.get("thumbs_down", 0)),
         "created_at": item["created_at"],
     }
 
@@ -102,10 +100,10 @@ class DynamoCommunityRepository(CommunityRepository):
 
     Key layout
     ----------
-    Posts:    PK=POST#{id}        SK=META             GSI1PK=POSTS  GSI1SK={created_at}
-    Comments: PK=POST#{post_id}  SK=COMMENT#{id}     GSI1PK=COMMENT#{id}  GSI1SK=META
-    Thumbs:  PK=THUMB#{type}#{target_id}  SK=VOTER#{voter}
-    Counter: PK=COUNTER          SK=COUNTER
+    Posts:    PK=POST#{id}                   SK=META           GSI1PK=POSTS  GSI1SK={created_at}
+    Comments: PK=POST#{post_id}             SK=COMMENT#{id}
+    Thumbs:  PK=THUMB#POST#{post_id}        SK=VOTER#{voter}
+    Counter: PK=COUNTER                     SK=COUNTER
     """
 
     def __init__(self, region: str, table_name: str, endpoint_url: str | None = None):
@@ -214,10 +212,9 @@ class DynamoCommunityRepository(CommunityRepository):
             await self._table.delete_item(
                 Key={"PK": f"POST#{post_id}", "SK": f"COMMENT#{c['id']}"}
             )
-            await self._delete_thumbs_for("comment", c["id"])
 
         # Delete thumbs for the post
-        await self._delete_thumbs_for("post", post_id)
+        await self._delete_thumbs_for(post_id)
 
         # Delete the post itself
         await self._table.delete_item(
@@ -246,14 +243,10 @@ class DynamoCommunityRepository(CommunityRepository):
         item = {
             "PK": f"POST#{post_id}",
             "SK": f"COMMENT#{comment_id}",
-            "GSI1PK": f"COMMENT#{comment_id}",
-            "GSI1SK": "META",
             "id": comment_id,
             "post_id": post_id,
             "author": author,
             "body": body,
-            "thumbs_up": 0,
-            "thumbs_down": 0,
             "created_at": now,
         }
         if parent_id is not None:
@@ -261,6 +254,7 @@ class DynamoCommunityRepository(CommunityRepository):
 
         await self._table.put_item(Item=item)
 
+        # Increment comment_count on the post
         await self._table.update_item(
             Key={"PK": f"POST#{post_id}", "SK": "META"},
             UpdateExpression="SET comment_count = if_not_exists(comment_count, :zero) + :inc",
@@ -269,91 +263,19 @@ class DynamoCommunityRepository(CommunityRepository):
 
         return _item_to_comment(item)
 
-    async def delete_comment(self, comment_id: int, user: str) -> int:
-        # Look up comment via GSI1
-        resp = await self._table.query(
-            IndexName="GSI1",
-            KeyConditionExpression="GSI1PK = :pk AND GSI1SK = :sk",
-            ExpressionAttributeValues={
-                ":pk": f"COMMENT#{comment_id}",
-                ":sk": "META",
-            },
-        )
-        items = resp.get("Items", [])
-        if not items:
-            raise CommentNotFoundError("Comment not found")
-        item = items[0]
-        if item["author"] != user:
-            raise OwnershipError("Not your comment")
+    # -- Thumbs (posts only) -------------------------------------------------
 
-        post_id = _decimal_to_int(item["post_id"])
-
-        # Delete child comments (replies to this comment)
-        children = await self._table.query(
-            KeyConditionExpression="PK = :pk AND begins_with(SK, :prefix)",
-            ExpressionAttributeValues={
-                ":pk": f"POST#{post_id}",
-                ":prefix": "COMMENT#",
-            },
-            FilterExpression="parent_id = :pid",
-        )
-        child_count = 0
-        for child in children.get("Items", []):
-            await self._table.delete_item(
-                Key={"PK": child["PK"], "SK": child["SK"]}
-            )
-            await self._delete_thumbs_for("comment", _decimal_to_int(child["id"]))
-            child_count += 1
-
-        # Delete the comment itself
-        await self._table.delete_item(
-            Key={"PK": f"POST#{post_id}", "SK": f"COMMENT#{comment_id}"}
-        )
-        await self._delete_thumbs_for("comment", comment_id)
-
-        # Decrement comment_count on the post
-        deleted_total = 1 + child_count
-        await self._table.update_item(
-            Key={"PK": f"POST#{post_id}", "SK": "META"},
-            UpdateExpression="SET comment_count = comment_count - :dec",
-            ExpressionAttributeValues={":dec": deleted_total},
-        )
-
-        return post_id
-
-    # -- Thumbs --------------------------------------------------------------
-
-    async def toggle_thumb(
-        self, target_type: str, target_id: int, voter: str, direction: int
-    ) -> dict:
-        thumb_pk = f"THUMB#{target_type}#{target_id}"
+    async def toggle_thumb(self, post_id: int, voter: str, direction: int) -> dict:
+        thumb_pk = f"THUMB#POST#{post_id}"
         thumb_sk = f"VOTER#{voter}"
 
-        if target_type == "comment":
-            resp = await self._table.query(
-                IndexName="GSI1",
-                KeyConditionExpression="GSI1PK = :pk AND GSI1SK = :sk",
-                ExpressionAttributeValues={
-                    ":pk": f"COMMENT#{target_id}",
-                    ":sk": "META",
-                },
-            )
-            items = resp.get("Items", [])
-            if not items:
-                raise CommentNotFoundError("Comment not found")
-            target_item = items[0]
-            post_id = _decimal_to_int(target_item["post_id"])
-            target_pk = f"POST#{post_id}"
-            target_sk = f"COMMENT#{target_id}"
-        else:
-            resp = await self._table.get_item(
-                Key={"PK": f"POST#{target_id}", "SK": "META"}
-            )
-            if not resp.get("Item"):
-                raise PostNotFoundError("Post not found")
-            target_pk = f"POST#{target_id}"
-            target_sk = "META"
+        resp = await self._table.get_item(
+            Key={"PK": f"POST#{post_id}", "SK": "META"}
+        )
+        if not resp.get("Item"):
+            raise PostNotFoundError("Post not found")
 
+        # Check existing thumb
         resp = await self._table.get_item(Key={"PK": thumb_pk, "SK": thumb_sk})
         existing = resp.get("Item")
 
@@ -375,25 +297,22 @@ class DynamoCommunityRepository(CommunityRepository):
             down_delta = 1 if direction == -1 else 0
 
         resp = await self._table.update_item(
-            Key={"PK": target_pk, "SK": target_sk},
+            Key={"PK": f"POST#{post_id}", "SK": "META"},
             UpdateExpression="SET thumbs_up = if_not_exists(thumbs_up, :zero) + :up, thumbs_down = if_not_exists(thumbs_down, :zero) + :down",
             ExpressionAttributeValues={":up": up_delta, ":down": down_delta, ":zero": 0},
             ReturnValues="ALL_NEW",
         )
         updated = resp["Attributes"]
-        result = {
+        return {
             "thumbs_up": _decimal_to_int(updated["thumbs_up"]),
             "thumbs_down": _decimal_to_int(updated["thumbs_down"]),
         }
-        if target_type == "comment":
-            result["post_id"] = post_id
-        return result
 
     # -- Internal helpers ----------------------------------------------------
 
-    async def _delete_thumbs_for(self, target_type: str, target_id: int) -> None:
-        """Delete all thumb records for a given target."""
-        thumb_pk = f"THUMB#{target_type}#{target_id}"
+    async def _delete_thumbs_for(self, post_id: int) -> None:
+        """Delete all thumb records for a post."""
+        thumb_pk = f"THUMB#POST#{post_id}"
         resp = await self._table.query(
             KeyConditionExpression="PK = :pk",
             ExpressionAttributeValues={":pk": thumb_pk},
